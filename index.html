@@ -775,6 +775,14 @@ function renderAddForm(){
       <label class="toggle"><input type="checkbox" id="f-fixa"><span class="toggle-slider"></span></label>
     </div>
     <button class="btn-primary" onclick="addTransaction()">Adicionar Lançamento</button>
+
+    <div class="section-label" style="margin-top:28px">Backup dos Dados</div>
+    <div class="card">
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Exporte para salvar ou transferir para outro dispositivo.</div>
+      <button class="btn-secondary" style="margin-top:0" onclick="exportarDados()">⬇ Exportar dados (JSON)</button>
+      <button class="btn-secondary" onclick="document.getElementById('importar-input').click()">⬆ Importar dados (JSON)</button>
+      <input type="file" id="importar-input" accept=".json" style="display:none" onchange="importarDados(this)">
+    </div>
   `;
   // hint de parcelas
   const parctEl=document.getElementById('f-parct');
@@ -983,6 +991,32 @@ function saveContaFixaEdit(id,ym){
 }
 
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+function exportarDados(){
+  const json=JSON.stringify(DB,null,2);
+  const a=document.createElement('a');
+  a.href='data:application/json;charset=utf-8,'+encodeURIComponent(json);
+  a.download='financas-backup-'+selectedMonth+'.json';
+  a.click();
+}
+function importarDados(input){
+  const file=input.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(!data.transacoes)throw new Error();
+      if(!confirm('Importar dados? Os dados atuais serão substituídos.'))return;
+      DB=data;
+      saveDB();
+      renderScreen(currentScreen);
+      alert('✓ Dados importados com sucesso!');
+    }catch{alert('Arquivo inválido.');}
+  };
+  reader.readAsText(file);
+  input.value='';
+}
 
 // ============================================================
 // INIT
