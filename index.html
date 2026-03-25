@@ -218,6 +218,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
     <div class="scroll-body" id="pessoas-body"></div>
   </div>
 
+  <div class="screen" id="screen-historico">
+    <div class="header"><div class="header-title">Histórico</div></div>
+    <div class="scroll-body" id="historico-body"></div>
+  </div>
+
   <div class="screen" id="screen-add">
     <div class="header"><div class="header-title">Adicionar</div></div>
     <div class="scroll-body"><div id="add-form-body"></div></div>
@@ -232,6 +237,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
     </div>
     <div class="nav-item" onclick="goScreen('pessoas',this)">
       <span class="ni">👤</span><span>Pessoas</span>
+    </div>
+    <div class="nav-item" onclick="goScreen('historico',this)">
+      <span class="ni">📅</span><span>Histórico</span>
     </div>
     <div class="nav-item" id="nav-add" style="display:none" onclick="goScreen('add',this)">
       <span class="ni">＋</span><span>Adicionar</span>
@@ -394,6 +402,7 @@ function renderScreen(name){
   if(name==='overview')renderOverview();
   else if(name==='cartoes')renderCartoes();
   else if(name==='pessoas')renderPessoas();
+  else if(name==='historico')renderHistorico();
   else if(name==='add')renderAddForm();
 }
 
@@ -776,18 +785,103 @@ function renderPessoas(){
     h+=`<div class="empty"><div class="empty-icon">😌</div><div>Sem gastos neste mês</div></div>`;
   }
 
-  h+=`<div class="section-label">Entradas — ${monthLabel(selectedMonth)}</div>
-  <div class="card">
-    ${[['salario','Salário'],['ferias','Férias'],['decimo','13º'],['outras','Outras']].map(([k,l])=>`
-    <div class="row"><div class="row-label">${l}</div><div class="row-val pos">${inc[k]?fmt(inc[k]):'—'}</div></div>`).join('')}
-    <div class="divider"></div>
-    <div class="row"><div class="row-label" style="font-weight:600">Total entradas</div><div class="row-val pos">${fmt(totalInc)}</div></div>
-    ${modoEdicao?`<button class="btn-secondary" style="margin-top:10px;padding:10px" onclick="openIncomeModal('${p}','${selectedMonth}')">✏️ Editar entradas</button>`:''}
-  </div>`;
-
   document.getElementById('pessoas-body').innerHTML=h;
 }
 function selectPerson(p){selectedPerson=p;renderPessoas();}
+
+// ============================================================
+// HISTÓRICO
+// ============================================================
+function getAllMonths(){
+  const s=new Set();
+  DB.transacoes.forEach(t=>s.add(t.data.substring(0,7)));
+  Object.keys(DB.contasFixas).forEach(k=>{const p=k.lastIndexOf('_');if(p>-1)s.add(k.substring(p+1));});
+  return[...s].sort().reverse();
+}
+
+function calcMes(ym){
+  const txs=txOfMonth(ym);
+  const cfValor=id=>(DB.contasFixas[id+'_'+ym]?.valor||0);
+  const cfResp=id=>(DB.contasFixas[id+'_'+ym]?.resp||'Casa');
+  const cfForResp=r=>CONTAS_FIXAS.reduce((a,cf)=>a+(cfResp(cf.id)===r?cfValor(cf.id):0),0);
+  const somaResp=r=>txs.filter(t=>t.responsavel===r).reduce((a,t)=>a+t.valor,0)+cfForResp(r);
+  const D=somaResp('Danielle');
+  const M=somaResp('Mayconn');
+  const C=somaResp('Casa');
+  return{D,M,C,total:D+M+C};
+}
+
+function renderHistorico(){
+  const meses=getAllMonths();
+  let h='';
+  if(!meses.length){
+    h='<div class="empty"><div class="empty-icon">📅</div><div>Nenhum lançamento ainda</div></div>';
+    document.getElementById('historico-body').innerHTML=h;
+    return;
+  }
+
+  // acumulado geral
+  let acumD=0,acumM=0;
+  meses.forEach(ym=>{const c=calcMes(ym);acumD+=c.D;acumM+=c.M;});
+  const difAcum=acumD-acumM;
+
+  h+=`<div class="card" style="margin-bottom:16px;border-color:${difAcum>0?'rgba(196,38,90,.25)':'rgba(26,95,180,.25)'}">
+    <div class="card-title">Saldo acumulado — quem pagou mais</div>
+    <div style="display:flex;gap:16px;margin-bottom:14px">
+      <div style="flex:1">
+        <div style="font-size:.72rem;color:var(--danielle);font-weight:600;text-transform:uppercase;letter-spacing:.8px">Danielle</div>
+        <div style="font-family:'Syne',sans-serif;font-size:1.15rem;font-weight:800;color:var(--danielle)">${fmt(acumD)}</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:.72rem;color:var(--mayconn);font-weight:600;text-transform:uppercase;letter-spacing:.8px">Mayconn</div>
+        <div style="font-family:'Syne',sans-serif;font-size:1.15rem;font-weight:800;color:var(--mayconn)">${fmt(acumM)}</div>
+      </div>
+    </div>
+    ${Math.abs(difAcum)>0.01?`<div style="background:${difAcum>0?'rgba(196,38,90,.08)':'rgba(26,95,180,.08)'};border:1px solid ${difAcum>0?'rgba(196,38,90,.2)':'rgba(26,95,180,.2)'};border-radius:10px;padding:12px;text-align:center">
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:4px">No total acumulado</div>
+      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.05rem;color:${difAcum>0?'var(--danielle)':'var(--mayconn)'}">
+        ${difAcum>0?'Mayconn deve':'Danielle deve'} ${fmt(Math.abs(difAcum))} ${difAcum>0?'à Danielle':'ao Mayconn'}
+      </div>
+    </div>`:'<div style="text-align:center;color:var(--green);font-family:\'Syne\',sans-serif;font-weight:700">Divisão equilibrada! ✓</div>'}
+  </div>`;
+
+  h+=`<div class="section-label">Mês a mês</div>`;
+  meses.forEach(ym=>{
+    const{D,M,C,total}=calcMes(ym);
+    if(total===0)return;
+    const dif=D-M;
+    h+=`<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-family:'Syne',sans-serif;font-size:.95rem;font-weight:700">${monthLabel(ym)}</div>
+        <div style="font-family:'Syne',sans-serif;font-size:.95rem;font-weight:800;color:var(--danger)">${fmt(total)}</div>
+      </div>
+      <div style="display:flex;gap:0;margin-bottom:10px">
+        ${D>0?`<div style="flex:${D};background:var(--danielle);height:5px;border-radius:4px 0 0 4px"></div>`:''}
+        ${M>0?`<div style="flex:${M};background:var(--mayconn);height:5px;${D>0?'':'border-radius:4px 0 0 4px'}${C>0?'':'border-radius:0 4px 4px 0'}"></div>`:''}
+        ${C>0?`<div style="flex:${C};background:var(--accent);height:5px;border-radius:0 4px 4px 0"></div>`:''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${D>0?`<div style="display:flex;justify-content:space-between;font-size:.83rem">
+          <span style="color:var(--danielle);font-weight:600">Danielle</span>
+          <span style="font-family:'Syne',sans-serif;font-weight:700">${fmt(D)}</span>
+        </div>`:''}
+        ${M>0?`<div style="display:flex;justify-content:space-between;font-size:.83rem">
+          <span style="color:var(--mayconn);font-weight:600">Mayconn</span>
+          <span style="font-family:'Syne',sans-serif;font-weight:700">${fmt(M)}</span>
+        </div>`:''}
+        ${C>0?`<div style="display:flex;justify-content:space-between;font-size:.83rem">
+          <span style="color:var(--accent);font-weight:600">🏠 Casa</span>
+          <span style="font-family:'Syne',sans-serif;font-weight:700">${fmt(C)}</span>
+        </div>`:''}
+      </div>
+      ${Math.abs(dif)>0.01?`<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:${dif>0?'rgba(196,38,90,.07)':'rgba(26,95,180,.07)'};font-size:.78rem;text-align:center;color:${dif>0?'var(--danielle)':'var(--mayconn)'};font-weight:600">
+        ${dif>0?'Mayconn pagou':'Danielle pagou'} ${fmt(Math.abs(dif))} a menos neste mês
+      </div>`:''}
+    </div>`;
+  });
+
+  document.getElementById('historico-body').innerHTML=h;
+}
 
 // ============================================================
 // ADICIONAR
