@@ -315,6 +315,7 @@ async function loadDB(){
   if(!DB.entradas)DB.entradas={Danielle:{},Mayconn:{}};
   if(!DB.contasFixas)DB.contasFixas={};
   if(!DB.ordemCartao)DB.ordemCartao={};
+  if(!DB.pagamentos)DB.pagamentos={};
   // se tinha dados no localStorage mas Supabase estava vazio, sobe agora
   if(!veioDoSupabase&&DB.transacoes.length>0){
     saveDB();
@@ -820,67 +821,129 @@ function renderHistorico(){
     return;
   }
 
-  // acumulado geral
-  let acumD=0,acumM=0;
-  meses.forEach(ym=>{const c=calcMes(ym);acumD+=c.D;acumM+=c.M;});
-  const difAcum=acumD-acumM;
+  // saldo acumulado considerando pagamentos reais
+  let acumPendente=0;
+  meses.forEach(ym=>{
+    const{total}=calcMes(ym);
+    const pg=DB.pagamentos[ym]||{};
+    const pago=(pg.danielle||0)+(pg.mayconn||0)+(pg.outras||0);
+    acumPendente+=total-pago;
+  });
 
-  h+=`<div class="card" style="margin-bottom:16px;border-color:${difAcum>0?'rgba(196,38,90,.25)':'rgba(26,95,180,.25)'}">
-    <div class="card-title">Saldo acumulado — quem pagou mais</div>
-    <div style="display:flex;gap:16px;margin-bottom:14px">
-      <div style="flex:1">
-        <div style="font-size:.72rem;color:var(--danielle);font-weight:600;text-transform:uppercase;letter-spacing:.8px">Danielle</div>
-        <div style="font-family:'Syne',sans-serif;font-size:1.15rem;font-weight:800;color:var(--danielle)">${fmt(acumD)}</div>
+  if(Math.abs(acumPendente)>0.01){
+    h+=`<div class="card" style="margin-bottom:16px;border-color:${acumPendente>0?'rgba(201,48,32,.25)':'rgba(26,122,80,.25)'}">
+      <div class="card-title">Saldo pendente acumulado</div>
+      <div style="font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:800;color:${acumPendente>0?'var(--danger)':'var(--green)'}">
+        ${acumPendente>0?'-':'+'}${fmt(Math.abs(acumPendente))}
       </div>
-      <div style="flex:1">
-        <div style="font-size:.72rem;color:var(--mayconn);font-weight:600;text-transform:uppercase;letter-spacing:.8px">Mayconn</div>
-        <div style="font-family:'Syne',sans-serif;font-size:1.15rem;font-weight:800;color:var(--mayconn)">${fmt(acumM)}</div>
-      </div>
-    </div>
-    ${Math.abs(difAcum)>0.01?`<div style="background:${difAcum>0?'rgba(196,38,90,.08)':'rgba(26,95,180,.08)'};border:1px solid ${difAcum>0?'rgba(196,38,90,.2)':'rgba(26,95,180,.2)'};border-radius:10px;padding:12px;text-align:center">
-      <div style="font-size:.78rem;color:var(--muted);margin-bottom:4px">No total acumulado</div>
-      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.05rem;color:${difAcum>0?'var(--danielle)':'var(--mayconn)'}">
-        ${difAcum>0?'Mayconn deve':'Danielle deve'} ${fmt(Math.abs(difAcum))} ${difAcum>0?'à Danielle':'ao Mayconn'}
-      </div>
-    </div>`:'<div style="text-align:center;color:var(--green);font-family:\'Syne\',sans-serif;font-weight:700">Divisão equilibrada! ✓</div>'}
-  </div>`;
+      <div style="font-size:.78rem;color:var(--muted);margin-top:4px">${acumPendente>0?'ainda não quitado em todos os meses':'saldo positivo'}</div>
+    </div>`;
+  } else if(meses.some(ym=>(DB.pagamentos[ym]?.danielle||0)+(DB.pagamentos[ym]?.mayconn||0)>0)){
+    h+=`<div class="card" style="margin-bottom:16px;border-color:rgba(26,122,80,.25)">
+      <div style="text-align:center;padding:8px 0;color:var(--green);font-family:'Syne',sans-serif;font-weight:800;font-size:1.05rem">Tudo quitado ✓</div>
+    </div>`;
+  }
 
   h+=`<div class="section-label">Mês a mês</div>`;
   meses.forEach(ym=>{
     const{D,M,C,total}=calcMes(ym);
     if(total===0)return;
-    const dif=D-M;
-    h+=`<div class="card" style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-family:'Syne',sans-serif;font-size:.95rem;font-weight:700">${monthLabel(ym)}</div>
-        <div style="font-family:'Syne',sans-serif;font-size:.95rem;font-weight:800;color:var(--danger)">${fmt(total)}</div>
+    const pg=DB.pagamentos[ym]||{};
+    const pgD=pg.danielle||0;
+    const pgM=pg.mayconn||0;
+    const pgO=pg.outras||0;
+    const pgODesc=pg.outras_desc||'';
+    const totalPago=pgD+pgM+pgO;
+    const pendente=total-totalPago;
+    const quitado=Math.abs(pendente)<0.01;
+
+    h+=`<div class="card" style="margin-bottom:12px">
+      <!-- cabeçalho do mês -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:700">${monthLabel(ym)}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${quitado&&totalPago>0?'<span style="font-size:.7rem;background:rgba(26,122,80,.1);color:var(--green);padding:2px 8px;border-radius:99px;font-weight:700">✓ Quitado</span>':''}
+          ${modoEdicao?`<button onclick="editPagamento('${ym}')" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 10px;font-size:.72rem;cursor:pointer">✏️ Registrar</button>`:''}
+        </div>
       </div>
-      <div style="display:flex;gap:0;margin-bottom:10px">
-        ${D>0?`<div style="flex:${D};background:var(--danielle);height:5px;border-radius:4px 0 0 4px"></div>`:''}
-        ${M>0?`<div style="flex:${M};background:var(--mayconn);height:5px;${D>0?'':'border-radius:4px 0 0 4px'}${C>0?'':'border-radius:0 4px 4px 0'}"></div>`:''}
-        ${C>0?`<div style="flex:${C};background:var(--accent);height:5px;border-radius:0 4px 4px 0"></div>`:''}
+
+      <!-- total devedor -->
+      <div style="background:rgba(201,48,32,.05);border:1px solid rgba(201,48,32,.15);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:4px">Saldo devedor do mês</div>
+        <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:var(--danger)">${fmt(total)}</div>
+        <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap">
+          ${D>0?`<div style="font-size:.75rem;color:var(--muted)">Danielle <span style="color:var(--danielle);font-family:'Syne',sans-serif;font-weight:700">${fmt(D)}</span></div>`:''}
+          ${M>0?`<div style="font-size:.75rem;color:var(--muted)">Mayconn <span style="color:var(--mayconn);font-family:'Syne',sans-serif;font-weight:700">${fmt(M)}</span></div>`:''}
+          ${C>0?`<div style="font-size:.75rem;color:var(--muted)">🏠 Casa <span style="color:var(--accent);font-family:'Syne',sans-serif;font-weight:700">${fmt(C)}</span></div>`:''}
+        </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:5px">
-        ${D>0?`<div style="display:flex;justify-content:space-between;font-size:.83rem">
-          <span style="color:var(--danielle);font-weight:600">Danielle</span>
-          <span style="font-family:'Syne',sans-serif;font-weight:700">${fmt(D)}</span>
+
+      <!-- pagamentos registrados -->
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:${totalPago>0?'12px':'0'}">
+        ${pgD>0?`<div style="display:flex;justify-content:space-between;align-items:center;font-size:.85rem">
+          <span style="color:var(--danielle);font-weight:600">💸 Danielle pagou</span>
+          <span style="font-family:'Syne',sans-serif;font-weight:700;color:var(--green)">${fmt(pgD)}</span>
         </div>`:''}
-        ${M>0?`<div style="display:flex;justify-content:space-between;font-size:.83rem">
-          <span style="color:var(--mayconn);font-weight:600">Mayconn</span>
-          <span style="font-family:'Syne',sans-serif;font-weight:700">${fmt(M)}</span>
+        ${pgM>0?`<div style="display:flex;justify-content:space-between;align-items:center;font-size:.85rem">
+          <span style="color:var(--mayconn);font-weight:600">💸 Mayconn pagou</span>
+          <span style="font-family:'Syne',sans-serif;font-weight:700;color:var(--green)">${fmt(pgM)}</span>
         </div>`:''}
-        ${C>0?`<div style="display:flex;justify-content:space-between;font-size:.83rem">
-          <span style="color:var(--accent);font-weight:600">🏠 Casa</span>
-          <span style="font-family:'Syne',sans-serif;font-weight:700">${fmt(C)}</span>
+        ${pgO>0?`<div style="display:flex;justify-content:space-between;align-items:center;font-size:.85rem">
+          <span style="color:var(--muted);font-weight:600">📎 ${pgODesc||'Outras verbas'}</span>
+          <span style="font-family:'Syne',sans-serif;font-weight:700;color:var(--green)">${fmt(pgO)}</span>
         </div>`:''}
       </div>
-      ${Math.abs(dif)>0.01?`<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:${dif>0?'rgba(196,38,90,.07)':'rgba(26,95,180,.07)'};font-size:.78rem;text-align:center;color:${dif>0?'var(--danielle)':'var(--mayconn)'};font-weight:600">
-        ${dif>0?'Mayconn pagou':'Danielle pagou'} ${fmt(Math.abs(dif))} a menos neste mês
+
+      <!-- saldo -->
+      ${totalPago>0?`<div style="border-top:1px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:.82rem;font-weight:600;color:var(--muted)">Pendente</div>
+        <div style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:800;color:${quitado?'var(--green)':'var(--danger)'}">
+          ${quitado?'R$\u00a00,00':fmt(pendente)}
+        </div>
       </div>`:''}
     </div>`;
   });
 
   document.getElementById('historico-body').innerHTML=h;
+}
+
+function editPagamento(ym){
+  const pg=DB.pagamentos[ym]||{};
+  document.getElementById('income-modal-title').textContent='Pagamentos — '+monthLabel(ym);
+  document.getElementById('income-form').innerHTML=`
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:16px">Registre os valores que foram efetivamente pagos em dinheiro/transferência neste mês.</div>
+    <div class="form-group">
+      <label class="form-label">💸 Danielle pagou (R$)</label>
+      <input class="form-input" id="pg-d" type="number" step="0.01" placeholder="0,00" value="${pg.danielle||''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">💸 Mayconn pagou (R$)</label>
+      <input class="form-input" id="pg-m" type="number" step="0.01" placeholder="0,00" value="${pg.mayconn||''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">📎 Outras verbas (R$)</label>
+      <input class="form-input" id="pg-o" type="number" step="0.01" placeholder="0,00" value="${pg.outras||''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Descrição das outras verbas</label>
+      <input class="form-input" id="pg-o-desc" placeholder="Ex: empréstimo Mayconn" value="${pg.outras_desc||''}">
+    </div>
+    <button class="btn-primary" onclick="savePagamento('${ym}')">Salvar</button>
+  `;
+  document.getElementById('modal-income').classList.add('open');
+}
+
+function savePagamento(ym){
+  if(!DB.pagamentos)DB.pagamentos={};
+  DB.pagamentos[ym]={
+    danielle:parseFloat(document.getElementById('pg-d').value)||0,
+    mayconn:parseFloat(document.getElementById('pg-m').value)||0,
+    outras:parseFloat(document.getElementById('pg-o').value)||0,
+    outras_desc:document.getElementById('pg-o-desc').value.trim(),
+  };
+  saveDB();
+  closeModal('modal-income');
+  renderHistorico();
 }
 
 // ============================================================
