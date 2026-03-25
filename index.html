@@ -9,6 +9,7 @@
 <meta name="theme-color" content="#f5f3ee">
 <title>Casa • Finanças</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
   --bg:#f5f3ee; --surface:#ffffff; --surface2:#eeecea; --border:#e2ded6;
@@ -222,18 +223,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
     <div class="scroll-body"><div id="add-form-body"></div></div>
   </div>
 
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" id="bottom-nav">
     <div class="nav-item active" onclick="goScreen('overview',this)">
       <span class="ni">◎</span><span>Geral</span>
     </div>
-<div class="nav-item" onclick="goScreen('cartoes',this)">
+    <div class="nav-item" onclick="goScreen('cartoes',this)">
       <span class="ni">💳</span><span>Cartões</span>
     </div>
     <div class="nav-item" onclick="goScreen('pessoas',this)">
       <span class="ni">👤</span><span>Pessoas</span>
     </div>
-    <div class="nav-item" onclick="goScreen('add',this)">
+    <div class="nav-item" id="nav-add" style="display:none" onclick="goScreen('add',this)">
       <span class="ni">＋</span><span>Adicionar</span>
+    </div>
+    <div class="nav-item" id="nav-lock" onclick="toggleModoEdicao()">
+      <span class="ni" id="lock-icon">🔒</span><span id="lock-label">Editar</span>
     </div>
   </nav>
 </div>
@@ -274,27 +278,83 @@ function catClass(c){
 }
 
 // ============================================================
+// SUPABASE
+// ============================================================
+const SUPABASE_URL='https://xrtrndyeuechaubrurxx.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhydHJuZHlldWVjaGF1YnJ1cnh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDA5NTEsImV4cCI6MjA4OTk3Njk1MX0.vf1KwtXQv9S3f7oPy-_leqUbQPQf0IbnTgVmPMHpf_w';
+let sb;
+
+// ============================================================
 // DB
 // ============================================================
-let DB = {transacoes:[], entradas:{Danielle:{},Mayconn:{}}, contasFixas:{}};
+let DB = {transacoes:[], entradas:{Danielle:{},Mayconn:{}}, contasFixas:{}, ordemCartao:{}};
 
-function loadDB(){
-  try{const r=localStorage.getItem('casafinancas_v3');if(r)DB=JSON.parse(r);}catch(e){}
+async function loadDB(){
+  // tenta carregar do Supabase primeiro
+  try{
+    const{data,error}=await sb.from('dados').select('db').eq('id','financas_casa').single();
+    if(!error&&data){
+      DB=data.db;
+      localStorage.setItem('casafinancas_v3',JSON.stringify(DB));
+    } else {
+      const r=localStorage.getItem('casafinancas_v3');
+      if(r)DB=JSON.parse(r);
+    }
+  }catch(e){
+    try{const r=localStorage.getItem('casafinancas_v3');if(r)DB=JSON.parse(r);}catch(e2){}
+  }
   if(!DB.transacoes)DB.transacoes=[];
   if(!DB.entradas)DB.entradas={Danielle:{},Mayconn:{}};
   if(!DB.contasFixas)DB.contasFixas={};
   if(!DB.ordemCartao)DB.ordemCartao={};
 }
-function saveDB(){localStorage.setItem('casafinancas_v3',JSON.stringify(DB));}
+
+function saveDB(){
+  // salva localStorage imediatamente (síncrono) e envia pro Supabase em background
+  localStorage.setItem('casafinancas_v3',JSON.stringify(DB));
+  if(sb){
+    sb.from('dados').upsert({id:'financas_casa',db:DB}).then(({error})=>{
+      if(error)console.error('Erro Supabase:',error);
+    });
+  }
+}
 
 function seedIfEmpty(){}
 
 // ============================================================
 // STATE
 // ============================================================
+const PIN='1234';
+let modoEdicao=false;
 let currentScreen='overview';
 let selectedMonth='2026-03';
 let selectedPerson='Danielle';
+
+function toggleModoEdicao(){
+  if(modoEdicao){
+    // desbloquear = confirmar lock
+    if(confirm('Sair do modo de edição?')){
+      modoEdicao=false;
+      renderNav();
+      renderScreen(currentScreen);
+    }
+  } else {
+    const pin=prompt('PIN de edição:');
+    if(pin===PIN){
+      modoEdicao=true;
+      renderNav();
+      renderScreen(currentScreen);
+    } else if(pin!==null){
+      alert('PIN incorreto.');
+    }
+  }
+}
+
+function renderNav(){
+  document.getElementById('nav-add').style.display=modoEdicao?'flex':'none';
+  document.getElementById('lock-icon').textContent=modoEdicao?'🔓':'🔒';
+  document.getElementById('lock-label').textContent=modoEdicao?'Bloquear':'Editar';
+}
 
 // ============================================================
 // UTILS
@@ -348,7 +408,8 @@ function recTag(f){return f?`<span class="tag tag-rec">↻ recorrente</span>`:''
 // ============================================================
 function renderTxItem(tx){
   const parc=tx.parcelas_total>1?`${tx.parcela_atual}/${tx.parcelas_total}`:'';
-  return`<div class="tx-item" onclick="txAction('${tx.id}')" style="cursor:pointer">
+  const clickAttr=modoEdicao?`onclick="txAction('${tx.id}')" style="cursor:pointer"`:'';
+  return`<div class="tx-item" ${clickAttr}>
     <div class="tx-icon ${catClass(tx.categoria)}">${catIcon(tx.categoria)}</div>
     <div class="tx-info">
       <div class="tx-name">${tx.desc}</div>
@@ -464,7 +525,7 @@ function renderOverview(){
         ${val?`<div style="margin-top:3px">${respTag(resp)}</div>`:''}
       </div>
       <span style="font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;margin-right:6px;${val?'color:var(--danger)':'color:var(--muted)'}">${val?fmt(val):'—'}</span>
-      <button class="btn-edit" onclick="editContaFixa('${cf.id}','${selectedMonth}')">✏️</button>
+      ${modoEdicao?`<button class="btn-edit" onclick="editContaFixa('${cf.id}','${selectedMonth}')">✏️</button>`:''}
     </div>`;
   });
   if(cfTotalMes>0){
@@ -551,17 +612,18 @@ function moverTx(txId,cartaoId,ym,dir){
 function renderTxOrdenavel(tx,idx,total,cartaoId,ym){
   const parc=tx.parcelas_total>1?`${tx.parcela_atual}/${tx.parcelas_total}`:'';
   const btnStyle='background:none;border:none;cursor:pointer;padding:3px 5px;font-size:.85rem;line-height:1;display:block';
+  const clickAttr=modoEdicao?`onclick="txAction('${tx.id}')" style="cursor:pointer"`:'';
   return`<div class="tx-item">
-    <div style="display:flex;flex-direction:column;justify-content:center;margin-right:4px">
+    ${modoEdicao?`<div style="display:flex;flex-direction:column;justify-content:center;margin-right:4px">
       <button style="${btnStyle};color:${idx===0?'var(--border)':'var(--muted)'}" onclick="moverTx('${tx.id}','${cartaoId}','${ym}',-1)">▲</button>
       <button style="${btnStyle};color:${idx===total-1?'var(--border)':'var(--muted)'}" onclick="moverTx('${tx.id}','${cartaoId}','${ym}',1)">▼</button>
-    </div>
-    <div class="tx-icon ${catClass(tx.categoria)}" onclick="txAction('${tx.id}')" style="cursor:pointer">${catIcon(tx.categoria)}</div>
-    <div class="tx-info" onclick="txAction('${tx.id}')" style="cursor:pointer">
+    </div>`:''}
+    <div class="tx-icon ${catClass(tx.categoria)}" ${clickAttr}>${catIcon(tx.categoria)}</div>
+    <div class="tx-info" ${clickAttr}>
       <div class="tx-name">${tx.desc}</div>
       <div class="tx-tags">${respTag(tx.responsavel)}${recTag(tx.fixa)}</div>
     </div>
-    <div class="tx-right" onclick="txAction('${tx.id}')" style="cursor:pointer">
+    <div class="tx-right" ${clickAttr}>
       <div class="tx-val neg">${fmt(tx.valor)}</div>
       ${parc?`<div class="tx-parcela">${parc}</div>`:''}
     </div>
@@ -603,10 +665,10 @@ function renderCartoes(){
       h+=`<div class="card" style="margin-top:-4px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <div class="card-title" style="margin-bottom:0">${mes.length} lançamento${mes.length>1?'s':''}</div>
-          <div style="display:flex;align-items:center;gap:6px">
+          ${modoEdicao?`<div style="display:flex;align-items:center;gap:6px">
             <button onclick="moverMesTodos('${c.id}','${selectedMonth}')" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:.72rem;cursor:pointer">→ +1 mês</button>
             <button onclick="inverterOrdem('${c.id}','${selectedMonth}')" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:.72rem;cursor:pointer">↕ Inverter</button>
-          </div>
+          </div>`:''}
         </div>`;
       mes.forEach((tx,idx)=>{h+=renderTxOrdenavel(tx,idx,mes.length,c.id,selectedMonth);});
       h+=`<div class="divider"></div>
@@ -716,7 +778,7 @@ function renderPessoas(){
     <div class="row"><div class="row-label">${l}</div><div class="row-val pos">${inc[k]?fmt(inc[k]):'—'}</div></div>`).join('')}
     <div class="divider"></div>
     <div class="row"><div class="row-label" style="font-weight:600">Total entradas</div><div class="row-val pos">${fmt(totalInc)}</div></div>
-    <button class="btn-secondary" style="margin-top:10px;padding:10px" onclick="openIncomeModal('${p}','${selectedMonth}')">✏️ Editar entradas</button>
+    ${modoEdicao?`<button class="btn-secondary" style="margin-top:10px;padding:10px" onclick="openIncomeModal('${p}','${selectedMonth}')">✏️ Editar entradas</button>`:''}
   </div>`;
 
   document.getElementById('pessoas-body').innerHTML=h;
@@ -778,7 +840,7 @@ function renderAddForm(){
 
     <div class="section-label" style="margin-top:28px">Backup dos Dados</div>
     <div class="card">
-      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Exporte para salvar ou transferir para outro dispositivo.</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Dados sincronizados automaticamente via Supabase. Use o backup apenas para migração.</div>
       <button class="btn-secondary" style="margin-top:0" onclick="exportarDados()">⬇ Exportar dados (JSON)</button>
       <button class="btn-secondary" onclick="document.getElementById('importar-input').click()">⬆ Importar dados (JSON)</button>
       <input type="file" id="importar-input" accept=".json" style="display:none" onchange="importarDados(this)">
@@ -834,6 +896,7 @@ function addTransaction(){
 // EDITAR / EXCLUIR LANÇAMENTO
 // ============================================================
 function txAction(id){
+  if(!modoEdicao)return;
   const tx=DB.transacoes.find(t=>t.id===id);
   if(!tx)return;
   const cartaoOpts=CARTOES.map(c=>`<option value="${c.id}" ${c.id===tx.cartao_id?'selected':''}>${c.nome} •••• ${c.numero}</option>`).join('');
@@ -1021,9 +1084,11 @@ function importarDados(input){
 // ============================================================
 // INIT
 // ============================================================
-window.addEventListener('DOMContentLoaded',()=>{
-  loadDB();
+window.addEventListener('DOMContentLoaded',async()=>{
+  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+  await loadDB();
   seedIfEmpty();
+  renderNav();
   renderOverview();
   setTimeout(()=>document.getElementById('splash').classList.add('hide'),800);
 });
