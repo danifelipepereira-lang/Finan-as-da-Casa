@@ -797,7 +797,7 @@ function getAllMonths(){
   const s=new Set();
   DB.transacoes.forEach(t=>s.add(t.data.substring(0,7)));
   Object.keys(DB.contasFixas).forEach(k=>{const p=k.lastIndexOf('_');if(p>-1)s.add(k.substring(p+1));});
-  return[...s].sort().reverse();
+  return[...s].filter(ym=>/^\d{4}-\d{2}$/.test(ym)).sort((a,b)=>b.localeCompare(a));
 }
 
 function calcMes(ym){
@@ -1108,8 +1108,21 @@ function txAction(id){
       </div>
     </div>
     <div class="toggle-row">
-      <div><div style="font-size:.9rem;font-weight:500">Recorrente</div></div>
-      <label class="toggle"><input type="checkbox" id="te-fixa" ${tx.fixa?'checked':''}><span class="toggle-slider"></span></label>
+      <div>
+        <div style="font-size:.9rem;font-weight:500">Recorrente</div>
+        <div style="font-size:.74rem;color:var(--muted);margin-top:2px">Repete todo mês</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="te-fixa" ${tx.fixa?'checked':''} onchange="toggleReplicar(this)"><span class="toggle-slider"></span></label>
+    </div>
+    <div id="te-replicar-box" style="display:${tx.fixa?'none':'none'};background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px">
+      <div style="font-size:.82rem;font-weight:500;margin-bottom:8px">Replicar para os próximos meses:</div>
+      <select class="form-select" id="te-replicar-meses">
+        <option value="0">Não replicar (só atualiza este)</option>
+        <option value="3">3 meses</option>
+        <option value="6">6 meses</option>
+        <option value="12" selected>12 meses</option>
+        <option value="24">24 meses</option>
+      </select>
     </div>
     <button class="btn-primary" onclick="saveTx('${id}')">Salvar alterações</button>
     <button class="btn-danger" onclick="deleteTx('${id}')">Excluir${isParc?' esta parcela':' lançamento'}</button>
@@ -1118,16 +1131,46 @@ function txAction(id){
   document.getElementById('modal-income').classList.add('open');
 }
 
+function toggleReplicar(chk){
+  const box=document.getElementById('te-replicar-box');
+  if(box)box.style.display=chk.checked?'block':'none';
+}
+
 function saveTx(id){
   const tx=DB.transacoes.find(t=>t.id===id);
   if(!tx)return;
+  const novaFixa=document.getElementById('te-fixa').checked;
+  const mesesRep=parseInt(document.getElementById('te-replicar-meses')?.value||'0')||0;
   tx.desc=document.getElementById('te-desc').value.trim()||tx.desc;
   tx.valor=parseFloat(document.getElementById('te-valor').value)||tx.valor;
   tx.data=document.getElementById('te-data').value||tx.data;
   tx.cartao_id=document.getElementById('te-cartao').value;
   tx.responsavel=document.getElementById('te-resp').value;
   tx.categoria=document.getElementById('te-cat').value;
-  tx.fixa=document.getElementById('te-fixa').checked;
+  tx.fixa=novaFixa;
+
+  // replicar para meses futuros se solicitado
+  if(novaFixa&&mesesRep>0){
+    const grupo=tx.grupo||('g_'+Date.now());
+    tx.grupo=grupo;
+    const base=new Date(tx.data+'T12:00:00');
+    for(let i=1;i<=mesesRep;i++){
+      const d=new Date(base.getFullYear(),base.getMonth()+i,base.getDate());
+      const ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      // não duplicar se já existe uma tx do mesmo grupo nesse mês
+      const ymExiste=ds.substring(0,7);
+      const jaExiste=DB.transacoes.some(t=>t.grupo===grupo&&t.data.startsWith(ymExiste)&&t.id!==tx.id);
+      if(!jaExiste){
+        DB.transacoes.push({
+          id:'tx_'+Date.now()+'_r'+i,
+          data:ds,desc:tx.desc,valor:tx.valor,
+          parcela_atual:1,parcelas_total:1,
+          cartao_id:tx.cartao_id,responsavel:tx.responsavel,
+          categoria:tx.categoria,fixa:true,grupo
+        });
+      }
+    }
+  }
   saveDB();
   closeModal('modal-income');
   renderScreen(currentScreen);
