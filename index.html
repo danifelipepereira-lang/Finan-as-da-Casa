@@ -290,23 +290,27 @@ let sb;
 let DB = {transacoes:[], entradas:{Danielle:{},Mayconn:{}}, contasFixas:{}, ordemCartao:{}};
 
 async function loadDB(){
-  // tenta carregar do Supabase primeiro
+  let veioDoSupabase=false;
   try{
     const{data,error}=await sb.from('dados').select('db').eq('id','financas_casa').single();
     if(!error&&data){
       DB=data.db;
+      veioDoSupabase=true;
       localStorage.setItem('casafinancas_v3',JSON.stringify(DB));
-    } else {
-      const r=localStorage.getItem('casafinancas_v3');
-      if(r)DB=JSON.parse(r);
     }
-  }catch(e){
-    try{const r=localStorage.getItem('casafinancas_v3');if(r)DB=JSON.parse(r);}catch(e2){}
+  }catch(e){}
+  if(!veioDoSupabase){
+    // Supabase vazio ou offline — usa localStorage
+    try{const r=localStorage.getItem('casafinancas_v3');if(r)DB=JSON.parse(r);}catch(e){}
   }
   if(!DB.transacoes)DB.transacoes=[];
   if(!DB.entradas)DB.entradas={Danielle:{},Mayconn:{}};
   if(!DB.contasFixas)DB.contasFixas={};
   if(!DB.ordemCartao)DB.ordemCartao={};
+  // se tinha dados no localStorage mas Supabase estava vazio, sobe agora
+  if(!veioDoSupabase&&DB.transacoes.length>0){
+    saveDB();
+  }
 }
 
 function saveDB(){
@@ -838,14 +842,23 @@ function renderAddForm(){
     </div>
     <button class="btn-primary" onclick="addTransaction()">Adicionar Lançamento</button>
 
-    <div class="section-label" style="margin-top:28px">Backup dos Dados</div>
+    <div class="section-label" style="margin-top:28px">Sincronização</div>
     <div class="card">
-      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Dados sincronizados automaticamente via Supabase. Use o backup apenas para migração.</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span id="sync-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0"></span>
+        <span id="sync-status" style="font-size:.82rem;color:var(--muted)">Verificando...</span>
+      </div>
+      <button class="btn-secondary" style="margin-top:0" onclick="sincronizarAgora()">☁ Sincronizar com nuvem agora</button>
+    </div>
+    <div class="section-label">Backup dos Dados</div>
+    <div class="card">
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">Exporte para salvar ou transferir entre dispositivos.</div>
       <button class="btn-secondary" style="margin-top:0" onclick="exportarDados()">⬇ Exportar dados (JSON)</button>
       <button class="btn-secondary" onclick="document.getElementById('importar-input').click()">⬆ Importar dados (JSON)</button>
       <input type="file" id="importar-input" accept=".json" style="display:none" onchange="importarDados(this)">
     </div>
   `;
+  atualizarStatusSync();
   // hint de parcelas
   const parctEl=document.getElementById('f-parct');
   const dataEl=document.getElementById('f-data');
@@ -1054,6 +1067,44 @@ function saveContaFixaEdit(id,ym){
 }
 
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+async function sincronizarAgora(){
+  const dot=document.getElementById('sync-dot');
+  const st=document.getElementById('sync-status');
+  if(dot)dot.style.background='var(--accent2)';
+  if(st)st.textContent='Sincronizando...';
+  try{
+    const{error}=await sb.from('dados').upsert({id:'financas_casa',db:DB});
+    localStorage.setItem('casafinancas_v3',JSON.stringify(DB));
+    if(error)throw error;
+    if(dot)dot.style.background='var(--green)';
+    if(st)st.textContent='Sincronizado agora! Mayconn pode ver os dados.';
+  }catch(e){
+    if(dot)dot.style.background='var(--danger)';
+    if(st)st.textContent='Erro ao sincronizar: '+e.message;
+  }
+}
+
+async function atualizarStatusSync(){
+  const dot=document.getElementById('sync-dot');
+  const st=document.getElementById('sync-status');
+  if(!dot||!st)return;
+  try{
+    const{data,error}=await sb.from('dados').select('updated_at').eq('id','financas_casa').single();
+    if(!error&&data){
+      const d=new Date(data.updated_at);
+      const fmt2=d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+      dot.style.background='var(--green)';
+      st.textContent='Última sync: '+fmt2;
+    } else {
+      dot.style.background='var(--accent2)';
+      st.textContent='Ainda não sincronizado com a nuvem.';
+    }
+  }catch(e){
+    dot.style.background='var(--danger)';
+    st.textContent='Sem conexão com a nuvem.';
+  }
+}
 
 function exportarDados(){
   const json=JSON.stringify(DB,null,2);
